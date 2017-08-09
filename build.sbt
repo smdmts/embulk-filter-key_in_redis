@@ -16,13 +16,14 @@ resolvers += Resolver.jcenterRepo
 resolvers += Resolver.sonatypeRepo("releases")
 resolvers += "velvia maven" at "http://dl.bintray.com/velvia/maven"
 
+lazy val circeVersion = "0.8.0"
 libraryDependencies ++= Seq(
   "org.jruby" % "jruby-complete" % "1.6.5",
   "org.embulk" % "embulk-core" % "0.8.25",
-  "com.typesafe.akka" %% "akka-actor" % "2.5.3",
   "com.github.etaty" %% "rediscala" % "1.7.0",
-  "org.scalacheck" %% "scalacheck" % "1.13.4" % Test,
-  "org.scalatest" %% "scalatest" % "3.0.1" % Test,
-  "org.scalamock" %% "scalamock-scalatest-support" % "3.6.0" % Test,
-  "com.github.alexarchambault" %% "scalacheck-shapeless_1.13" % "1.1.5" % Test
+  "org.bouncycastle" % "bcpkix-jdk15on" % "1.57",
+  "io.circe" %% "circe-core" % circeVersion,
+  "io.circe" %% "circe-generic" % circeVersion,
+  "io.circe" %% "circe-parser" % circeVersion,
+  "org.scalatest" %% "scalatest" % "3.0.1" % Test
 )

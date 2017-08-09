@@ -21,8 +21,13 @@ targetCompatibility = 1.7
 dependencies {
     compile  "org.embulk:embulk-core:0.8.26"
     compile "org.scala-lang:scala-library:2.11.11"
+    compile group: 'io.circe', name: 'circe-core_2.11', version: '0.8.0'
+    compile group: 'io.circe', name: 'circe-generic_2.11', version: '0.8.0'
+    compile group: 'io.circe', name: 'circe-parser_2.11', version: '0.8.0'
+    compile group: 'com.github.etaty', name: 'rediscala_2.11', version: '1.7.0'
+    compile group: 'org.bouncycastle', name: 'bcpkix-jdk15on', version: '1.57'
+    testCompile group: 'org.scalatest', name: 'scalatest_2.11', version: '3.0.1'
     provided "org.embulk:embulk-core:0.8.26"
-    // compile "YOUR_JAR_DEPENDENCY_GROUP:YOUR_JAR_DEPENDENCY_MODULE:YOUR_JAR_DEPENDENCY_VERSION"
     testCompile "junit:junit:4.+"
 }
 
