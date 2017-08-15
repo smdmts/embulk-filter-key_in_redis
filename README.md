@@ -1,6 +1,6 @@
 # Key In Redis filter plugin for Embulk
 
-Filter the aggregated key into set of the Redis plugin.  
+Filtering by aggregated the keys in included Redis's SET.
 
 This plugin is designed to extract data set diff files used with the combination in below use cases.
 
