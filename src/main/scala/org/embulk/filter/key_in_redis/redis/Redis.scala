@@ -24,12 +24,24 @@ case class Redis(setKey: String, host: String, port: Int, db: Option[Int]) {
     Await.result(s, 10.minute)
   }
 
-  def exists(value: String): Boolean = {
-    val s = redis.sismember(setKey, value)
-    Await.result(s, 10.minute)
+  def exists(values: Seq[String]): Map[String, Boolean] = {
+    import scala.concurrent.ExecutionContext.Implicits.global
+    val input = values.zipWithIndex.map(_.swap).toMap
+    val transaction = redis.transaction()
+    val f = values.map { v =>
+      transaction.sismember(setKey, v)
+    }
+    transaction.exec()
+    val results = Await
+      .result(Future.sequence(f), 10.minutes)
+      .zipWithIndex
+      .map(_.swap)
+      .toMap
+    results.map {
+      case (index, result) =>
+        input(index) -> result
+    }
   }
-
-  def nonExists(value: String): Boolean = !exists(value)
 
   def close(): Unit = {
     redis.stop()
