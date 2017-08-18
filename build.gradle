@@ -21,11 +21,13 @@ targetCompatibility = 1.7
 dependencies {
     compile  "org.embulk:embulk-core:0.8.26"
     compile "org.scala-lang:scala-library:2.11.11"
+    compile group: 'com.github.pathikrit', name: 'better-files_2.11', version: '2.17.1'
     compile group: 'io.circe', name: 'circe-core_2.11', version: '0.8.0'
     compile group: 'io.circe', name: 'circe-generic_2.11', version: '0.8.0'
     compile group: 'io.circe', name: 'circe-parser_2.11', version: '0.8.0'
     compile group: 'com.github.etaty', name: 'rediscala_2.11', version: '1.7.0'
     compile group: 'org.bouncycastle', name: 'bcpkix-jdk15on', version: '1.57'
+    compile 'org.velvia:msgpack4s_2.11:0.6.0'
     compile group: 'org.scalaz', name: 'scalaz-core_2.11', version: '7.2.14'
     compile group: 'org.scalaz', name: 'scalaz-concurrent_2.11', version: '7.2.14'
     testCompile group: 'org.scalatest', name: 'scalatest_2.11', version: '3.0.1'

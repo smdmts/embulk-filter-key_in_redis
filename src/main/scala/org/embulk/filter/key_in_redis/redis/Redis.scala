@@ -8,26 +8,44 @@ import scala.concurrent.duration._
 import scala.concurrent._
 import scala.util._
 import scala.collection.mutable.ListBuffer
+import better.files._
+import org.velvia.MsgPackUtils._
+import org.velvia.MsgPack
 
 class Redis(setKey: String,
             host: String,
             port: Int,
             db: Option[Int],
             loadOnMemory: Boolean,
-            loadedCache: Set[String] = Set.empty)(implicit logger: Logger) {
+            localCachePath:Option[String])(implicit logger: Logger) {
   implicit val actorSystem = akka.actor.ActorSystem(
     "redis-client",
     classLoader = Some(this.getClass.getClassLoader))
 
   lazy val cache: Set[String] = if (loadOnMemory) {
-    if (loadedCache.isEmpty) {
-      loadAll()
-    } else loadedCache
+    if (localCachePath.isDefined) {
+      val tmpFile = file"${localCachePath.get}"
+      if (tmpFile.exists) {
+        logger.info(s"Load local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
+        val record = unpackSeq(tmpFile.byteArray).map(_.toString).toSet
+        logger.info(s"Load local cache file finished.")
+        record
+      } else {
+        val record = loadAll()
+        logger.info(s"Writing local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
+        tmpFile.touch()
+        tmpFile.writeByteArray(MsgPack.pack(record))
+        logger.info(s"Start writing local cache file finished.")
+        record.toSet
+      }
+    } else {
+      loadAll().toSet
+    }
   } else Set.empty
 
   val redis = RedisClient(host, port, db = db)
 
-  private def loadAll(): Set[String] = {
+  private def loadAll(): Seq[String] = {
     logger.info(s"Loading start.")
     import scala.concurrent.ExecutionContext.Implicits.global
     import ToFutureExtensionOps._
@@ -43,7 +61,7 @@ class Redis(setKey: String,
     }
     _scan(0)
     logger.info(s"Loading finished. ${buffer.size}")
-    buffer.toSet
+    buffer
   }
 
   def ping(): String = {
@@ -72,7 +90,9 @@ class Redis(setKey: String,
         transaction.sismember(setKey, v)
       }
       transaction.exec()
-      val results = Future.sequence(f).toTask
+      val results = Future
+        .sequence(f)
+        .toTask
         .unsafePerformSync
         .zipWithIndex
         .map(_.swap)

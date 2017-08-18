@@ -17,6 +17,10 @@ trait PluginTask extends Task with TimestampFormatter.Task {
   @ConfigDefault("false")
   def getLoadOnMemory: Boolean
 
+  @Config("local_cache_path")
+  @ConfigDefault("null")
+  def getLocalCachePath: Optional[String]
+
   @Config("key_with_index")
   @ConfigDefault("{}")
   def getKeyWithIndex: java.util.Map[String, String]
