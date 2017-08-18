@@ -1,16 +1,50 @@
 package org.embulk.filter.key_in_redis.redis
 
-import redis.RedisClient
+import org.slf4j.Logger
+import redis._
 
+import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.concurrent._
 import scala.util._
+import scala.collection.mutable.ListBuffer
 
-case class Redis(setKey: String, host: String, port: Int, db: Option[Int]) {
+class Redis(setKey: String,
+            host: String,
+            port: Int,
+            db: Option[Int],
+            loadOnMemory: Boolean,
+            loadedCache: Set[String] = Set.empty)(implicit logger: Logger) {
   implicit val actorSystem = akka.actor.ActorSystem(
     "redis-client",
     classLoader = Some(this.getClass.getClassLoader))
+
+  lazy val cache: Set[String] = if (loadOnMemory) {
+    if (loadedCache.isEmpty) {
+      loadAll()
+    } else loadedCache
+  } else Set.empty
+
   val redis = RedisClient(host, port, db = db)
+
+  private def loadAll(): Set[String] = {
+    logger.info(s"Loading start.")
+    import scala.concurrent.ExecutionContext.Implicits.global
+    import ToFutureExtensionOps._
+    val buffer = new ListBuffer[String]
+    @tailrec
+    def _scan(cursor: Int): Unit = {
+      val task = redis.sscan[String](setKey, cursor, Option(500)).toTask
+      val result = task.unsafePerformSync
+      buffer.append(result.data: _*)
+      if (result.index != 0) {
+        _scan(result.index)
+      }
+    }
+    _scan(0)
+    logger.info(s"Loading finished. ${buffer.size}")
+    buffer.toSet
+  }
 
   def ping(): String = {
     import scala.concurrent.ExecutionContext.Implicits.global
@@ -25,21 +59,28 @@ case class Redis(setKey: String, host: String, port: Int, db: Option[Int]) {
   }
 
   def exists(values: Seq[String]): Map[String, Boolean] = {
-    import scala.concurrent.ExecutionContext.Implicits.global
-    val input = values.zipWithIndex.map(_.swap).toMap
-    val transaction = redis.transaction()
-    val f = values.map { v =>
-      transaction.sismember(setKey, v)
-    }
-    transaction.exec()
-    val results = Await
-      .result(Future.sequence(f), 10.minutes)
-      .zipWithIndex
-      .map(_.swap)
-      .toMap
-    results.map {
-      case (index, result) =>
-        input(index) -> result
+    if (loadOnMemory) {
+      values.map { v =>
+        v -> cache.contains(v)
+      }.toMap
+    } else {
+      import scala.concurrent.ExecutionContext.Implicits.global
+      import ToFutureExtensionOps._
+      val input = values.zipWithIndex.map(_.swap).toMap
+      val transaction = redis.transaction()
+      val f = values.map { v =>
+        transaction.sismember(setKey, v)
+      }
+      transaction.exec()
+      val results = Future.sequence(f).toTask
+        .unsafePerformSync
+        .zipWithIndex
+        .map(_.swap)
+        .toMap
+      results.map {
+        case (index, result) =>
+          input(index) -> result
+      }
     }
   }
 

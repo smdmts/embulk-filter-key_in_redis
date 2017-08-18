@@ -22,6 +22,8 @@ libraryDependencies ++= Seq(
   "org.embulk" % "embulk-core" % "0.8.25",
   "com.github.etaty" %% "rediscala" % "1.7.0",
   "org.bouncycastle" % "bcpkix-jdk15on" % "1.57",
+  "org.scalaz" %% "scalaz-core" % "7.2.14",
+  "org.scalaz" %% "scalaz-concurrent" % "7.2.14",
   "io.circe" %% "circe-core" % circeVersion,
   "io.circe" %% "circe-generic" % circeVersion,
   "io.circe" %% "circe-parser" % circeVersion,
