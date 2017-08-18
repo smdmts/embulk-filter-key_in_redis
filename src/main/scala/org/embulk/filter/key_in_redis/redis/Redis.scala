@@ -31,15 +31,21 @@ class Redis(setKey: String,
       if (tmpFile.exists) {
         logger.info(
           s"Load local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
-        val record = unpackSeq(tmpFile.byteArray).map(_.toString).toSet
+        val buffer = new ListBuffer[String]
+        Iterator
+          .continually(tmpFile.newBufferedReader.readLine())
+          .takeWhile(_ != null)
+          .foreach { line =>
+            buffer.append(line)
+          }
         logger.info(s"Load local cache file finished.")
-        record
+        buffer.toSet
       } else {
         val record = loadAll()
         logger.info(
           s"Writing local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
         tmpFile.touch()
-        tmpFile.writeByteArray(MsgPack.pack(record))
+        tmpFile.writeText(record.mkString("\n"))
         logger.info(s"Writing local cache file finished.")
         record.toSet
       }
