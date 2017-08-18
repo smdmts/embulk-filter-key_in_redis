@@ -15,27 +15,32 @@ import org.velvia.MsgPack
 class Redis(setKey: String,
             host: String,
             port: Int,
+            replicaHosts: Map[String, Int],
             db: Option[Int],
             loadOnMemory: Boolean,
-            localCachePath:Option[String])(implicit logger: Logger) {
+            localCachePath: Option[String])(implicit logger: Logger) {
   implicit val actorSystem = akka.actor.ActorSystem(
     "redis-client",
     classLoader = Some(this.getClass.getClassLoader))
 
   lazy val cache: Set[String] = if (loadOnMemory) {
+    logger.info(s"Using cache.")
     if (localCachePath.isDefined) {
+      logger.info(s"Using local file cache.")
       val tmpFile = file"${localCachePath.get}"
       if (tmpFile.exists) {
-        logger.info(s"Load local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
+        logger.info(
+          s"Load local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
         val record = unpackSeq(tmpFile.byteArray).map(_.toString).toSet
         logger.info(s"Load local cache file finished.")
         record
       } else {
         val record = loadAll()
-        logger.info(s"Writing local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
+        logger.info(
+          s"Writing local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
         tmpFile.touch()
         tmpFile.writeByteArray(MsgPack.pack(record))
-        logger.info(s"Start writing local cache file finished.")
+        logger.info(s"Writing local cache file finished.")
         record.toSet
       }
     } else {
@@ -43,7 +48,16 @@ class Redis(setKey: String,
     }
   } else Set.empty
 
-  val redis = RedisClient(host, port, db = db)
+  val redisServers: Seq[RedisClient] = {
+    val primary = RedisClient(host, port, db = db)
+    val replica = replicaHosts.map {
+      case (host: String, port: Int) =>
+        RedisClient(host, port, db = db)
+    }
+    Seq(primary) ++ replica.toSeq
+  }
+
+  def redis: RedisClient = Random.shuffle(redisServers).head
 
   private def loadAll(): Seq[String] = {
     logger.info(s"Loading start.")

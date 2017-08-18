@@ -6,6 +6,8 @@ import org.embulk.spi
 import org.embulk.spi._
 import org.slf4j.Logger
 
+import scala.collection.JavaConverters._
+
 class KeyInRedisFilterPlugin extends FilterPlugin {
 
   override def transaction(config: ConfigSource,
@@ -44,9 +46,16 @@ object KeyInRedisFilterPlugin {
       Some(task.getLocalCachePath.get())
     } else None
     KeyInRedisFilterPlugin.redis = Some(
-      new Redis(task.getRedisSetKey, task.getHost, task.getPort, {
-        if (task.getDb.isPresent) Some(task.getDb.get())
-        else None
-      }, task.getLoadOnMemory, cachePath))
+      new Redis(
+        task.getRedisSetKey,
+        task.getHost,
+        task.getPort,
+        task.getReplicaHosts.asScala.toMap.mapValues(_.toInt), {
+          if (task.getDb.isPresent) Some(task.getDb.get())
+          else None
+        },
+        task.getLoadOnMemory,
+        cachePath
+      ))
   }
 }

@@ -41,6 +41,10 @@ trait PluginTask extends Task with TimestampFormatter.Task {
   @ConfigDefault("6379")
   def getPort: Int
 
+  @Config("replica_hosts")
+  @ConfigDefault("{}")
+  def getReplicaHosts: java.util.Map[String, String]
+
   @Config("db")
   @ConfigDefault("null")
   def getDb: Optional[Int]
