@@ -13,6 +13,10 @@ trait PluginTask extends Task with TimestampFormatter.Task {
   @ConfigDefault("false")
   def getMatchAsMD5: Boolean
 
+  @Config("load_on_memory")
+  @ConfigDefault("false")
+  def getLoadOnMemory: Boolean
+
   @Config("key_with_index")
   @ConfigDefault("{}")
   def getKeyWithIndex: java.util.Map[String, String]

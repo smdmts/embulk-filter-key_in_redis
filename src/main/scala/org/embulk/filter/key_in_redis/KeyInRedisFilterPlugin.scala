@@ -4,6 +4,7 @@ import org.embulk.config.{ConfigSource, TaskSource}
 import org.embulk.filter.key_in_redis.redis.Redis
 import org.embulk.spi
 import org.embulk.spi._
+import org.slf4j.Logger
 
 class KeyInRedisFilterPlugin extends FilterPlugin {
 
@@ -11,9 +12,15 @@ class KeyInRedisFilterPlugin extends FilterPlugin {
                            inputSchema: Schema,
                            control: FilterPlugin.Control): Unit = {
     val task = config.loadConfig(classOf[PluginTask])
+    val taskSource = task.dump()
     KeyInRedisFilterPlugin.createRedisInstance(task)
     KeyInRedisFilterPlugin.redis.foreach(_.ping())
-    control.run(task.dump(), inputSchema)
+    if (task.getLoadOnMemory) {
+      val cache =
+        KeyInRedisFilterPlugin.redis.map(_.cache).getOrElse(Set.empty)
+      taskSource.set(KeyInRedisFilterPlugin.cacheName, cache)
+    }
+    control.run(taskSource, inputSchema)
     KeyInRedisFilterPlugin.redis.foreach(_.close())
   }
 
@@ -25,19 +32,26 @@ class KeyInRedisFilterPlugin extends FilterPlugin {
     KeyInRedisFilterPlugin.redis match {
       case Some(_) => // nothing to do
       case None => // for map reduce executor.
-        KeyInRedisFilterPlugin.createRedisInstance(task)
+        val record = if (task.getLoadOnMemory) {
+          taskSource.get(classOf[Set[String]],
+                         KeyInRedisFilterPlugin.cacheName)
+        } else Set.empty[String]
+        KeyInRedisFilterPlugin.createRedisInstance(task, record)
     }
     PageOutput(task, outputSchema, output)
   }
 }
 
 object KeyInRedisFilterPlugin {
+  lazy val cacheName = s"${this.getClass.getCanonicalName}-cache"
+  implicit val logger: Logger = Exec.getLogger(classOf[KeyInRedisFilterPlugin])
   var redis: Option[Redis] = None
-  def createRedisInstance(task: PluginTask): Unit = {
+  def createRedisInstance(task: PluginTask,
+                          cache: Set[String] = Set.empty): Unit = {
     KeyInRedisFilterPlugin.redis = Some(
-      Redis(task.getRedisSetKey, task.getHost, task.getPort, {
+      new Redis(task.getRedisSetKey, task.getHost, task.getPort, {
         if (task.getDb.isPresent) Some(task.getDb.get())
         else None
-      }))
+      }, task.getLoadOnMemory))
   }
 }
