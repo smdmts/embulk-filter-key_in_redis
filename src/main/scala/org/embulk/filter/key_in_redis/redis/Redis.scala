@@ -7,43 +7,53 @@ import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.concurrent._
 import scala.util._
-import scala.collection.mutable.ListBuffer
+
+import scala.collection.mutable
 
 class Redis(setKey: String,
             host: String,
             port: Int,
+            replicaHosts: Map[String, Int],
             db: Option[Int],
-            loadOnMemory: Boolean,
-            loadedCache: Set[String] = Set.empty)(implicit logger: Logger) {
+            loadOnMemory: Boolean)(implicit logger: Logger) {
   implicit val actorSystem = akka.actor.ActorSystem(
     "redis-client",
     classLoader = Some(this.getClass.getClassLoader))
 
-  lazy val cache: Set[String] = if (loadOnMemory) {
-    if (loadedCache.isEmpty) {
-      loadAll()
-    } else loadedCache
-  } else Set.empty
+  lazy val cacheInstance: Option[Cache] = if (loadOnMemory) {
+    Some(Cache(() => loadAll()))
+  } else None
 
-  val redis = RedisClient(host, port, db = db)
+  val redisServers: Seq[RedisClient] = {
+    val primary = RedisClient(host, port, db = db)
+    val replica = replicaHosts.map {
+      case (host: String, port: Int) =>
+        RedisClient(host, port, db = db)
+    }
+    Seq(primary) ++ replica.toSeq
+  }
 
-  private def loadAll(): Set[String] = {
-    logger.info(s"Loading start.")
+  def redis: RedisClient = Random.shuffle(redisServers).head
+
+  def loadAll(): mutable.Set[String] = {
+    logger.info(s"Loading from Redis start.")
     import scala.concurrent.ExecutionContext.Implicits.global
     import ToFutureExtensionOps._
-    val buffer = new ListBuffer[String]
+    val buffer = mutable.Set.empty[String]
     @tailrec
     def _scan(cursor: Int): Unit = {
       val task = redis.sscan[String](setKey, cursor, Option(500)).toTask
       val result = task.unsafePerformSync
-      buffer.append(result.data: _*)
+      result.data.foreach { v =>
+        buffer.add(v)
+      }
       if (result.index != 0) {
         _scan(result.index)
       }
     }
     _scan(0)
-    logger.info(s"Loading finished. ${buffer.size}")
-    buffer.toSet
+    logger.info(s"Loading from Redis finished. record size is ${buffer.size}")
+    buffer
   }
 
   def ping(): String = {
@@ -58,12 +68,12 @@ class Redis(setKey: String,
     Await.result(s, 10.minute)
   }
 
-  def exists(values: Seq[String]): Map[String, Boolean] = {
-    if (loadOnMemory) {
+  def exists(values: Seq[String]): Map[String, Boolean] = cacheInstance match {
+    case Some(cached) =>
       values.map { v =>
-        v -> cache.contains(v)
+        v -> cached.contains(v)
       }.toMap
-    } else {
+    case None =>
       import scala.concurrent.ExecutionContext.Implicits.global
       import ToFutureExtensionOps._
       val input = values.zipWithIndex.map(_.swap).toMap
@@ -72,7 +82,9 @@ class Redis(setKey: String,
         transaction.sismember(setKey, v)
       }
       transaction.exec()
-      val results = Future.sequence(f).toTask
+      val results = Future
+        .sequence(f)
+        .toTask
         .unsafePerformSync
         .zipWithIndex
         .map(_.swap)
@@ -81,7 +93,6 @@ class Redis(setKey: String,
         case (index, result) =>
           input(index) -> result
       }
-    }
   }
 
   def close(): Unit = {
