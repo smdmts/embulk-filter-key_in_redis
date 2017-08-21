@@ -15,14 +15,13 @@ class Redis(setKey: String,
             port: Int,
             replicaHosts: Map[String, Int],
             db: Option[Int],
-            loadOnMemory: Boolean,
-            localCachePath: Option[String])(implicit logger: Logger) {
+            loadOnMemory: Boolean)(implicit logger: Logger) {
   implicit val actorSystem = akka.actor.ActorSystem(
     "redis-client",
     classLoader = Some(this.getClass.getClassLoader))
 
   lazy val cacheInstance: Option[Cache] = if (loadOnMemory) {
-    Some(Cache(localCachePath, () => loadAll()))
+    Some(Cache(() => loadAll()))
   } else None
 
   val redisServers: Seq[RedisClient] = {
