@@ -1,49 +1,60 @@
 package org.embulk.filter.key_in_redis.redis
 
+import java.io.{BufferedWriter, FileWriter, PrintWriter}
+
 import better.files._
 import org.slf4j.Logger
 
 import scala.collection.mutable
 
-case class Cache(localCachePath: Option[String],
-                 loading: () => mutable.Set[String])(implicit logger: Logger) {
+case class Cache(
+    localCachePath: Option[String],
+    loadFromStorage: () => mutable.Set[String])(implicit logger: Logger) {
 
-  private var cache = mutable.Set[String]()
-  private val fileOpt: Option[File] = localCachePath.map(v => file"$v")
+  private var cache = get()
+  def fileOpt: Option[File] = localCachePath.map(v => file"$v")
 
-  def cacheFileExists(): Boolean = fileOpt.exists(_.exists)
+  def cacheFileExists(): Boolean =
+    if (fileOpt.nonEmpty) {
+      fileOpt.get.exists
+    } else false
+
   def contains(value: String): Boolean = cache.contains(value)
 
-  def get(): mutable.Set[String] = {
-    if (cache.nonEmpty) {
-      cache
+  def get(): mutable.Set[String] =
+    if (cacheFileExists()) {
+      logger.info(s"Local cache loading start.")
+      val record = loadFromLocalCache()
+      logger.info(
+        s"Local cache loading finished. record size is ${record.size}. ")
+      record
     } else {
-      if (cacheFileExists()) {
-        cache = loading()
-        cache
-      } else {
-        cache = loading()
-        writeLocalCache()
-        cache
-      }
+      cache = loadFromStorage()
+      writeLocalCache(cache)
+      cache
     }
+
+  def loadFromLocalCache(): mutable.Set[String] = {
+    fileOpt.map { file =>
+      val records = mutable.Set[String]()
+      file.lines.foreach { line =>
+        records.add(line)
+      }
+      records
+    } getOrElse mutable.Set.empty[String]
   }
 
-  private def writeLocalCache(): Unit = {
-    logger.info(s"Writing local cache start.")
-    var list = List.empty[String]
+  private def writeLocalCache(record: mutable.Set[String]): Unit = {
     fileOpt.foreach { file =>
-      cache.foreach { v =>
-        list = v :: list
-        if (list.size == 10000) {
-          file.appendLines(list: _*)
-        }
+      logger.info(s"Writing local cache start.")
+      val pw = new PrintWriter(new BufferedWriter(new FileWriter(file.toJava)))
+      record.foreach { v =>
+        pw.println(v)
       }
-      if (list.nonEmpty) {
-        file.appendLines(list: _*)
-      }
+      pw.close()
+      logger.info(
+        s"Writing local cache finished. record size is ${record.size}")
     }
-    logger.info(s"Writing local cache finished.")
   }
 
 }

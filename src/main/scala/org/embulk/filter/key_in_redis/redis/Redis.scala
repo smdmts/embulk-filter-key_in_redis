@@ -21,7 +21,7 @@ class Redis(setKey: String,
     "redis-client",
     classLoader = Some(this.getClass.getClassLoader))
 
-  val cacheInstance: Option[Cache] = if (loadOnMemory) {
+  lazy val cacheInstance: Option[Cache] = if (loadOnMemory) {
     Some(Cache(localCachePath, () => loadAll()))
   } else None
 
@@ -37,7 +37,7 @@ class Redis(setKey: String,
   def redis: RedisClient = Random.shuffle(redisServers).head
 
   def loadAll(): mutable.Set[String] = {
-    logger.info(s"Loading start.")
+    logger.info(s"Loading from Redis start.")
     import scala.concurrent.ExecutionContext.Implicits.global
     import ToFutureExtensionOps._
     val buffer = mutable.Set.empty[String]
@@ -53,7 +53,7 @@ class Redis(setKey: String,
       }
     }
     _scan(0)
-    logger.info(s"Loading finished. ${buffer.size}")
+    logger.info(s"Loading from Redis finished. record size is ${buffer.size}")
     buffer
   }
 
