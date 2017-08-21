@@ -28,7 +28,8 @@ This plugin is designed to extract data set diff files used with the combination
 |  redis_set_key                       | string      | required   |                          | redis of key of set name |
 |  load_on_memory                      | boolean     | optional   | "false"                  | load all data from redis *1 |
 |  appender                            | string      | optional   | "-"                      | multi key of appender  |
-|  match_as_md5                        | boolean    | optional   | "false"                   | smembers the value to converted md5 |
+|  match_as_md5                        | boolean     | optional   | "false"                  | smembers the value to converted md5 |
+|  replica_hosts                       | hash: Map<String,Int>    | optional   |             | list of replica redis servers host: port |
 |  key_with_index                      | hash: Map<Int,String> | required with key_with_index or json_key_with_index or only one || index with key name |
 |  json_key_with_index                 | hash: Map<Int,String> | required with key_with_index or json_key_with_index or only one || json columns's expanded key name |
 |  default_timezone                    | string      | optional   | UTC                      | |
