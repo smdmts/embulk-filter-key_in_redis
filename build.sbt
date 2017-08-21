@@ -25,7 +25,6 @@ libraryDependencies ++= Seq(
   "com.github.pathikrit" %% "better-files" % "2.17.1",
   "org.scalaz" %% "scalaz-core" % "7.2.14",
   "org.scalaz" %% "scalaz-concurrent" % "7.2.14",
-  "org.velvia" %% "msgpack4s" % "0.6.0",
   "io.circe" %% "circe-core" % circeVersion,
   "io.circe" %% "circe-generic" % circeVersion,
   "io.circe" %% "circe-parser" % circeVersion,

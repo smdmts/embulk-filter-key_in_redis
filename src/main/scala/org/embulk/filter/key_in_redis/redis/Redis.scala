@@ -7,10 +7,8 @@ import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.concurrent._
 import scala.util._
-import scala.collection.mutable.ListBuffer
-import better.files._
-import org.velvia.MsgPackUtils._
-import org.velvia.MsgPack
+
+import scala.collection.mutable
 
 class Redis(setKey: String,
             host: String,
@@ -23,36 +21,9 @@ class Redis(setKey: String,
     "redis-client",
     classLoader = Some(this.getClass.getClassLoader))
 
-  lazy val cache: Set[String] = if (loadOnMemory) {
-    logger.info(s"Using cache.")
-    if (localCachePath.isDefined) {
-      logger.info(s"Using local file cache.")
-      val tmpFile = file"${localCachePath.get}"
-      if (tmpFile.exists) {
-        logger.info(
-          s"Load local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
-        val buffer = new ListBuffer[String]
-        Iterator
-          .continually(tmpFile.newBufferedReader.readLine())
-          .takeWhile(_ != null)
-          .foreach { line =>
-            buffer.append(line)
-          }
-        logger.info(s"Load local cache file finished.")
-        buffer.toSet
-      } else {
-        val record = loadAll()
-        logger.info(
-          s"Writing local cache file start. ${tmpFile.path.toAbsolutePath.toString}")
-        tmpFile.touch()
-        tmpFile.writeText(record.mkString("\n"))
-        logger.info(s"Writing local cache file finished.")
-        record.toSet
-      }
-    } else {
-      loadAll().toSet
-    }
-  } else Set.empty
+  val cacheInstance: Option[Cache] = if (loadOnMemory) {
+    Some(Cache(localCachePath, () => loadAll()))
+  } else None
 
   val redisServers: Seq[RedisClient] = {
     val primary = RedisClient(host, port, db = db)
@@ -65,16 +36,18 @@ class Redis(setKey: String,
 
   def redis: RedisClient = Random.shuffle(redisServers).head
 
-  private def loadAll(): Seq[String] = {
+  def loadAll(): mutable.Set[String] = {
     logger.info(s"Loading start.")
     import scala.concurrent.ExecutionContext.Implicits.global
     import ToFutureExtensionOps._
-    val buffer = new ListBuffer[String]
+    val buffer = mutable.Set.empty[String]
     @tailrec
     def _scan(cursor: Int): Unit = {
       val task = redis.sscan[String](setKey, cursor, Option(500)).toTask
       val result = task.unsafePerformSync
-      buffer.append(result.data: _*)
+      result.data.foreach { v =>
+        buffer.add(v)
+      }
       if (result.index != 0) {
         _scan(result.index)
       }
@@ -96,12 +69,12 @@ class Redis(setKey: String,
     Await.result(s, 10.minute)
   }
 
-  def exists(values: Seq[String]): Map[String, Boolean] = {
-    if (loadOnMemory) {
+  def exists(values: Seq[String]): Map[String, Boolean] = cacheInstance match {
+    case Some(cached) =>
       values.map { v =>
-        v -> cache.contains(v)
+        v -> cached.contains(v)
       }.toMap
-    } else {
+    case None =>
       import scala.concurrent.ExecutionContext.Implicits.global
       import ToFutureExtensionOps._
       val input = values.zipWithIndex.map(_.swap).toMap
@@ -121,7 +94,6 @@ class Redis(setKey: String,
         case (index, result) =>
           input(index) -> result
       }
-    }
   }
 
   def close(): Unit = {
