@@ -73,7 +73,7 @@ Gem::Specification.new do |spec|
   spec.description   = %[Key In Redis]
   spec.email         = ["smdmts@gmail.com"]
   spec.licenses      = ["MIT"]
-  # TODO set this: spec.homepage      = "https://github.com/smdmts/embulk-filter-key_in_redis"
+  spec.homepage      = "https://github.com/smdmts/embulk-filter-key_in_redis"
 
   spec.files         = `git ls-files`.split("\n") + Dir["classpath/*.jar"]
   spec.test_files    = spec.files.grep(%r"^(test|spec)/")
