@@ -47,6 +47,7 @@ case class PageOutput(task: PluginTask,
       handlerBuffer.append(
         PageHandler(matchValue, PassthroughColumnVisitor(reader, pageBuilder)))
     }
+    reader.close()
     KeyInRedisFilterPlugin.redis.foreach { redis =>
       val result = redis.exists(handlerBuffer.map(_.matchValue))
       handlerBuffer.foreach { value =>
@@ -56,7 +57,7 @@ case class PageOutput(task: PluginTask,
         }
       }
     }
-    reader.close()
+
   }
 
   override def finish(): Unit = pageBuilder.finish()
