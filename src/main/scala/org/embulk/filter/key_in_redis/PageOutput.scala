@@ -7,17 +7,9 @@ import org.bouncycastle.util.encoders.Hex
 import org.embulk.filter.key_in_redis.column._
 
 import scala.collection.mutable.ListBuffer
-
 import scala.collection.JavaConverters._
 import org.embulk.spi.time.TimestampFormatter
-import org.embulk.spi.{
-  Exec,
-  Page,
-  PageBuilder,
-  PageReader,
-  Schema,
-  PageOutput => EmbulkPageOutput
-}
+import org.embulk.spi.{Buffer, Exec, Page, PageBuilder, PageReader, Schema, PageOutput => EmbulkPageOutput}
 
 case class PageOutput(task: PluginTask,
                       schema: Schema,
@@ -27,32 +19,39 @@ case class PageOutput(task: PluginTask,
   def timestampFormatter(): TimestampFormatter =
     new TimestampFormatter(task, Optional.absent())
 
-  val digestMd5: MessageDigest = MessageDigest.getInstance("MD5")
-
   override def add(page: Page): Unit = {
     val reader: PageReader = new PageReader(schema)
     reader.setPage(page)
-    val handlerBuffer = new ListBuffer[PageHandler]()
+    val handlerBuffer = new ListBuffer[String]()
     while (reader.nextRecord()) {
       val setValueVisitor = SetValueColumnVisitor(
         reader,
         timestampFormatter(),
         task.getKeyWithIndex.asScala.toMap,
         task.getJsonKeyWithIndex.asScala.toMap,
-        task.getAppender)
+        task.getAppender,
+        task.getMatchAsMD5)
       schema.visitColumns(setValueVisitor)
-      val matchValue = if (task.getMatchAsMD5) {
-        Hex.toHexString(digestMd5.digest(setValueVisitor.getValue.getBytes()))
-      } else setValueVisitor.getValue
-      handlerBuffer.append(
-        PageHandler(matchValue, PassthroughColumnVisitor(reader, pageBuilder)))
+      handlerBuffer.append(setValueVisitor.getValue)
     }
+
     KeyInRedisFilterPlugin.redis.foreach { redis =>
-      val result = redis.exists(handlerBuffer.map(_.matchValue))
-      handlerBuffer.foreach { value =>
-        if (!result(value.matchValue)) {
-          schema.visitColumns(value.visitor)
-          value.visitor.addRecord()
+      val result = redis.exists(handlerBuffer)
+      val newReader: PageReader = new PageReader(schema)
+      newReader.setPage(page)
+      while (newReader.nextRecord()) {
+        val setValueVisitor = SetValueColumnVisitor(
+          newReader,
+          timestampFormatter(),
+          task.getKeyWithIndex.asScala.toMap,
+          task.getJsonKeyWithIndex.asScala.toMap,
+          task.getAppender,
+          task.getMatchAsMD5)
+        schema.visitColumns(setValueVisitor)
+        if (!result(setValueVisitor.getValue)) {
+          val visitor = PassthroughColumnVisitor(newReader, pageBuilder)
+          schema.visitColumns(visitor)
+          visitor.addRecord()
         }
       }
     }
@@ -64,4 +63,4 @@ case class PageOutput(task: PluginTask,
 
 }
 
-case class PageHandler(matchValue: String, visitor: PassthroughColumnVisitor)
+case class PageHandler(matchValue: String)

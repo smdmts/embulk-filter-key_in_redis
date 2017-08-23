@@ -1,22 +1,23 @@
 package org.embulk.filter.key_in_redis.column
 
+import java.security.MessageDigest
+
+import org.bouncycastle.util.encoders.Hex
 import org.embulk.filter.key_in_redis.json.JsonParser
 import org.embulk.spi.time.TimestampFormatter
-import org.embulk.spi.{
-  Column,
-  PageReader,
-  ColumnVisitor => EmbulkColumnVisitor
-}
+import org.embulk.spi.{Column, PageReader, ColumnVisitor => EmbulkColumnVisitor}
 
 case class SetValueColumnVisitor(reader: PageReader,
                                  timestampFormatter: TimestampFormatter,
                                  keyMap: Map[String, String],
                                  jsonKeyMap: Map[String, String],
-                                 appender: String)
+                                 appender: String,
+                                 matchAsMd5: Boolean)
     extends EmbulkColumnVisitor {
   import scala.collection.mutable
   private val recordMap = mutable.Map[String, String]()
 
+  val digestMd5: MessageDigest = MessageDigest.getInstance("MD5")
   val parameterKeys: Seq[String] = keyMap.values.toSeq
   val jsonKeys: Seq[String] = jsonKeyMap.values.toSeq
   val sortedKeys: List[String] = {
@@ -80,11 +81,15 @@ case class SetValueColumnVisitor(reader: PageReader,
   }
 
   def getValue: String = {
-    sortedKeys
+    val keys = sortedKeys
       .flatMap { key =>
         recordMap.get(key)
       }
       .mkString(appender)
+
+     if (matchAsMd5) {
+      Hex.toHexString(digestMd5.digest(keys.getBytes()))
+    } else keys
   }
 
 }
