@@ -1,22 +1,31 @@
 package org.embulk.filter.key_in_redis.column
 
+import java.security.MessageDigest
+
+import org.bouncycastle.util.encoders.Hex
 import org.embulk.filter.key_in_redis.json.JsonParser
-import org.embulk.spi.time.TimestampFormatter
+import org.embulk.spi.`type`._
+import org.embulk.spi.time.{Timestamp, TimestampFormatter}
 import org.embulk.spi.{
   Column,
+  PageBuilder,
   PageReader,
   ColumnVisitor => EmbulkColumnVisitor
 }
+import org.msgpack.value.Value
 
 case class SetValueColumnVisitor(reader: PageReader,
                                  timestampFormatter: TimestampFormatter,
                                  keyMap: Map[String, String],
                                  jsonKeyMap: Map[String, String],
-                                 appender: String)
+                                 appender: String,
+                                 matchAsMd5: Boolean)
     extends EmbulkColumnVisitor {
   import scala.collection.mutable
   private val recordMap = mutable.Map[String, String]()
+  private val valueHolderSet = mutable.Set[ValueHolder[_]]()
 
+  val digestMd5: MessageDigest = MessageDigest.getInstance("MD5")
   val parameterKeys: Seq[String] = keyMap.values.toSeq
   val jsonKeys: Seq[String] = jsonKeyMap.values.toSeq
   val sortedKeys: List[String] = {
@@ -65,12 +74,17 @@ case class SetValueColumnVisitor(reader: PageReader,
       put(column, v.toJson)
     }
 
-  def value[A](column: Column, method: => (Column => A)): Option[A] =
-    if (reader.isNull(column)) {
+  def value[A](column: Column, method: => (Column => A)): Option[A] = {
+    val result = if (reader.isNull(column)) {
       None
     } else {
       Some(method(column))
     }
+    valueHolderSet.add(ValueHolder(column, result))
+    result
+  }
+
+  case class ValueHolder[A](column: Column, value: Option[A])
 
   def put(column: Column, value: String): Unit = {
     if (parameterKeys.contains(column.getName)) {
@@ -79,12 +93,41 @@ case class SetValueColumnVisitor(reader: PageReader,
     ()
   }
 
-  def getValue: String = {
-    sortedKeys
+  def addRecord(pageBuilder: PageBuilder): Unit = {
+    valueHolderSet.foreach { vh =>
+      vh.value match {
+        case Some(v: Boolean) if vh.column.getType.isInstanceOf[BooleanType] =>
+          pageBuilder.setBoolean(vh.column, v)
+        case Some(v: Long) if vh.column.getType.isInstanceOf[LongType] =>
+          pageBuilder.setLong(vh.column, v)
+        case Some(v: Double) if vh.column.getType.isInstanceOf[DoubleType] =>
+          pageBuilder.setDouble(vh.column, v)
+        case Some(v: String) if vh.column.getType.isInstanceOf[StringType] =>
+          pageBuilder.setString(vh.column, v)
+        case Some(v: Timestamp)
+            if vh.column.getType.isInstanceOf[TimestampType] =>
+          pageBuilder.setTimestamp(vh.column, v)
+        case Some(v: Value) if vh.column.getType.isInstanceOf[JsonType] =>
+          pageBuilder.setJson(vh.column, v)
+        case None =>
+          pageBuilder.setNull(vh.column)
+        case _ =>
+          sys.error("unmatched types.")
+      }
+    }
+    pageBuilder.addRecord()
+  }
+
+  def getMatchKey: String = {
+    val keys = sortedKeys
       .flatMap { key =>
         recordMap.get(key)
       }
       .mkString(appender)
+
+    if (matchAsMd5) {
+      Hex.toHexString(digestMd5.digest(keys.getBytes()))
+    } else keys
   }
 
 }
