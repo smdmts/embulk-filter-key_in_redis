@@ -1,15 +1,19 @@
 package org.embulk.filter.key_in_redis
 
-import java.security.MessageDigest
-
 import com.google.common.base.Optional
-import org.bouncycastle.util.encoders.Hex
 import org.embulk.filter.key_in_redis.column._
 
 import scala.collection.mutable.ListBuffer
 import scala.collection.JavaConverters._
 import org.embulk.spi.time.TimestampFormatter
-import org.embulk.spi.{Buffer, Exec, Page, PageBuilder, PageReader, Schema, PageOutput => EmbulkPageOutput}
+import org.embulk.spi.{
+  Exec,
+  Page,
+  PageBuilder,
+  PageReader,
+  Schema,
+  PageOutput => EmbulkPageOutput
+}
 
 case class PageOutput(task: PluginTask,
                       schema: Schema,
@@ -20,47 +24,31 @@ case class PageOutput(task: PluginTask,
     new TimestampFormatter(task, Optional.absent())
 
   override def add(page: Page): Unit = {
-    val reader: PageReader = new PageReader(schema)
-    reader.setPage(page)
-    val handlerBuffer = new ListBuffer[String]()
-    while (reader.nextRecord()) {
+    val baseReader: PageReader = new PageReader(schema)
+    baseReader.setPage(page)
+    val rows = new ListBuffer[SetValueColumnVisitor]()
+    while (baseReader.nextRecord()) {
       val setValueVisitor = SetValueColumnVisitor(
-        reader,
+        baseReader,
         timestampFormatter(),
         task.getKeyWithIndex.asScala.toMap,
         task.getJsonKeyWithIndex.asScala.toMap,
         task.getAppender,
         task.getMatchAsMD5)
       schema.visitColumns(setValueVisitor)
-      handlerBuffer.append(setValueVisitor.getValue)
+      rows.append(setValueVisitor)
     }
-
     KeyInRedisFilterPlugin.redis.foreach { redis =>
-      val result = redis.exists(handlerBuffer)
-      val newReader: PageReader = new PageReader(schema)
-      newReader.setPage(page)
-      while (newReader.nextRecord()) {
-        val setValueVisitor = SetValueColumnVisitor(
-          newReader,
-          timestampFormatter(),
-          task.getKeyWithIndex.asScala.toMap,
-          task.getJsonKeyWithIndex.asScala.toMap,
-          task.getAppender,
-          task.getMatchAsMD5)
-        schema.visitColumns(setValueVisitor)
-        if (!result(setValueVisitor.getValue)) {
-          val visitor = PassthroughColumnVisitor(newReader, pageBuilder)
-          schema.visitColumns(visitor)
-          visitor.addRecord()
+      val result = redis.exists(rows.map(_.getMatchKey))
+      rows.foreach { row =>
+        if (!result(row.getMatchKey)) {
+          row.addRecord(pageBuilder)
         }
       }
     }
-    reader.close()
   }
 
   override def finish(): Unit = pageBuilder.finish()
   override def close(): Unit = pageBuilder.close()
 
 }
-
-case class PageHandler(matchValue: String)
