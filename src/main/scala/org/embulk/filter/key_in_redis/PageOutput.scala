@@ -25,6 +25,7 @@ case class PageOutput(task: PluginTask,
                       output: EmbulkPageOutput)
     extends EmbulkPageOutput {
   val pageBuilder = new PageBuilder(Exec.getBufferAllocator, schema, output)
+  var finished = false
   def timestampFormatter(): TimestampFormatter =
     new TimestampFormatter(task, Optional.absent())
 
@@ -45,23 +46,30 @@ case class PageOutput(task: PluginTask,
     baseReader.close()
   }
 
-  override def finish(): Unit = {
+  def counter():Int = {
     import scala.concurrent.ExecutionContext.Implicits.global
     implicit val timeout = Timeout(24, TimeUnit.HOURS)
-    (Actors.register ? Finish(pageBuilder))
-      .mapTo[Applied]
+    (Actors.register ? Counter(pageBuilder))
+      .mapTo[Int]
       .toTask
       .unsafePerformSync
+  }
 
+  override def finish(): Unit = {
+    while(counter() == 0) {
+      Thread.sleep(1000)
+    }
+    if (!finished) {
+      pageBuilder.finish()
+      finished = true
+    }
   }
 
   override def close(): Unit = {
-    import scala.concurrent.ExecutionContext.Implicits.global
-    implicit val timeout = Timeout(24, TimeUnit.HOURS)
-    (Actors.register ? Close(pageBuilder))
-      .mapTo[Applied]
-      .toTask
-      .unsafePerformSync
+    while(counter() == 0 & finished) {
+      Thread.sleep(1000)
+    }
+    pageBuilder.close()
   }
 
 }

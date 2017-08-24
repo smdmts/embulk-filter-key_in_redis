@@ -26,39 +26,33 @@ class Register extends Actor {
       if (rowList.size == 500) {
         addRecords(rowList)
       }
-    case Finish(pb) =>
-      val (finishRecords, _) =
+    case Counter(pb) =>
+      val (owned, _) =
         rowList.partition(_.pageBuilder == pb)
-      Await.result(addRecords(finishRecords), Duration.Inf)
-      pb.finish()
-      sender() ! Applied()
-    case Close(pb) =>
-      val (finishRecords, _) =
-        rowList.partition(_.pageBuilder == pb)
-      Await.result(addRecords(finishRecords), Duration.Inf)
-      pb.close()
-      sender() ! Applied()
-    case Write(row) =>
+      sender() ! owned.size
+    case Add(row) =>
       row.addRecord()
+      rowList = rowList.filter(_ == row)
+    case Ignore(row) =>
       rowList = rowList.filter(_ == row)
   }
 
-  private def addRecords(rows: List[Row]): Future[List[_]] = {
+  private def addRecords(rows: List[Row]) = {
     val result = redis.exists(rows.map(_.matchKey))
-    val writer = rows.map { row =>
-      val resultFuture = result(row.matchKey)
-      resultFuture.map { result =>
+    rows.foreach { row =>
+      val f = result(row.matchKey)
+      f.foreach { result =>
         if (!result) {
           implicit val timeout = Timeout(24, TimeUnit.HOURS)
-          self ? Write(row)
+          self ! Add(row)
+        } else {
+          self ! Ignore(row)
         }
       }
     }
-    Future.sequence(writer)
   }
 }
 
-case class Write(row: Row)
-case class Finish(pageBuilder: PageBuilder)
-case class Close(pageBuilder: PageBuilder)
-case class Applied()
+case class Add(row: Row)
+case class Ignore(row: Row)
+case class Counter(pageBuilder: PageBuilder)
