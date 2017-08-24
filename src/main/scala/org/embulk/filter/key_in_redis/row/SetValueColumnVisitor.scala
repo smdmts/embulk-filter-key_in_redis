@@ -1,18 +1,16 @@
-package org.embulk.filter.key_in_redis.column
+package org.embulk.filter.key_in_redis.row
 
 import java.security.MessageDigest
 
 import org.bouncycastle.util.encoders.Hex
 import org.embulk.filter.key_in_redis.json.JsonParser
-import org.embulk.spi.`type`._
-import org.embulk.spi.time.{Timestamp, TimestampFormatter}
+import org.embulk.spi.time.TimestampFormatter
 import org.embulk.spi.{
   Column,
   PageBuilder,
   PageReader,
   ColumnVisitor => EmbulkColumnVisitor
 }
-import org.msgpack.value.Value
 
 case class SetValueColumnVisitor(reader: PageReader,
                                  timestampFormatter: TimestampFormatter,
@@ -84,8 +82,6 @@ case class SetValueColumnVisitor(reader: PageReader,
     result
   }
 
-  case class ValueHolder[A](column: Column, value: Option[A])
-
   def put(column: Column, value: String): Unit = {
     if (parameterKeys.contains(column.getName)) {
       recordMap.put(column.getName, value)
@@ -93,41 +89,18 @@ case class SetValueColumnVisitor(reader: PageReader,
     ()
   }
 
-  def addRecord(pageBuilder: PageBuilder): Unit = {
-    valueHolderSet.foreach { vh =>
-      vh.value match {
-        case Some(v: Boolean) if vh.column.getType.isInstanceOf[BooleanType] =>
-          pageBuilder.setBoolean(vh.column, v)
-        case Some(v: Long) if vh.column.getType.isInstanceOf[LongType] =>
-          pageBuilder.setLong(vh.column, v)
-        case Some(v: Double) if vh.column.getType.isInstanceOf[DoubleType] =>
-          pageBuilder.setDouble(vh.column, v)
-        case Some(v: String) if vh.column.getType.isInstanceOf[StringType] =>
-          pageBuilder.setString(vh.column, v)
-        case Some(v: Timestamp)
-            if vh.column.getType.isInstanceOf[TimestampType] =>
-          pageBuilder.setTimestamp(vh.column, v)
-        case Some(v: Value) if vh.column.getType.isInstanceOf[JsonType] =>
-          pageBuilder.setJson(vh.column, v)
-        case None =>
-          pageBuilder.setNull(vh.column)
-        case _ =>
-          sys.error("unmatched types.")
-      }
-    }
-    pageBuilder.addRecord()
-  }
-
-  def getMatchKey: String = {
+  lazy val matchKey: String = {
     val keys = sortedKeys
       .flatMap { key =>
         recordMap.get(key)
       }
       .mkString(appender)
-
     if (matchAsMd5) {
       Hex.toHexString(digestMd5.digest(keys.getBytes()))
     } else keys
   }
+
+  def getRow(pageBuilder: PageBuilder): Row =
+    Row(matchKey, valueHolderSet, pageBuilder)
 
 }

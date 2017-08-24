@@ -1,8 +1,8 @@
-package org.embulk.filter.key_in_redis.redis
+package org.embulk.filter.key_in_redis
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
-import scalaz._, Scalaz._
+import scalaz.Scalaz._
 import scalaz.concurrent._
 
 final class FutureExtensionOps[A](self: Future[A]) {
