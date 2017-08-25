@@ -46,7 +46,7 @@ case class PageOutput(task: PluginTask,
     baseReader.close()
   }
 
-  def counter():Int = {
+  def counter(): Int = {
     import scala.concurrent.ExecutionContext.Implicits.global
     implicit val timeout = Timeout(24, TimeUnit.HOURS)
     (Actors.register ? Counter(pageBuilder))
@@ -55,8 +55,17 @@ case class PageOutput(task: PluginTask,
       .unsafePerformSync
   }
 
+  def forceWrite(): Unit = {
+    Actors.register ! ForceWrite(pageBuilder)
+  }
+
   override def finish(): Unit = {
-    while(counter() == 0) {
+    var lastRecord = false
+    while (counter() != 0) {
+      if (!lastRecord) {
+        forceWrite()
+        lastRecord = true
+      }
       Thread.sleep(1000)
     }
     if (!finished) {
@@ -66,7 +75,13 @@ case class PageOutput(task: PluginTask,
   }
 
   override def close(): Unit = {
-    while(counter() == 0 & finished) {
+    var lastRecord = false
+    while (counter() != 0 & finished) {
+      if (!lastRecord) {
+        forceWrite()
+        lastRecord = true
+      }
+      println(s"closing ${counter()}")
       Thread.sleep(1000)
     }
     pageBuilder.close()

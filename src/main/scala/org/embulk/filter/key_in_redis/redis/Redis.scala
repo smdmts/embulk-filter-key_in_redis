@@ -1,5 +1,9 @@
 package org.embulk.filter.key_in_redis.redis
 
+import java.util.concurrent.TimeUnit
+
+import akka.util.Timeout
+import akka.pattern.ask
 import org.slf4j.Logger
 import redis._
 import org.embulk.filter.key_in_redis.actor.Actors._
@@ -9,6 +13,8 @@ import scala.concurrent.duration._
 import scala.concurrent._
 import scala.util._
 import scala.collection.mutable
+import org.embulk.filter.key_in_redis.ToFutureExtensionOps._
+import org.embulk.filter.key_in_redis.actor.{Actors, Counter, TotalCount}
 
 class Redis(setKey: String,
             host: String,
@@ -96,10 +102,21 @@ class Redis(setKey: String,
     }
 
   def close(): Unit = {
+    while(counter() != 0) {
+      Thread.sleep(1000)
+    }
     redis.stop()
     // wait for stopping.
     Thread.sleep(1000)
     actorSystem.shutdown()
+  }
+
+  def counter(): Int = {
+    implicit val timeout = Timeout(24, TimeUnit.HOURS)
+    (Actors.register ? TotalCount)
+      .mapTo[Int]
+      .toTask
+      .unsafePerformSync
   }
 
 }
