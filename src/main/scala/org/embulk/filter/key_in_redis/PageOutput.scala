@@ -81,7 +81,6 @@ case class PageOutput(task: PluginTask,
         forceWrite()
         lastRecord = true
       }
-      println(s"closing ${counter()}")
       Thread.sleep(1000)
     }
     pageBuilder.close()
