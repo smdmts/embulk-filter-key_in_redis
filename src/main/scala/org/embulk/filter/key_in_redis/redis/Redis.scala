@@ -14,7 +14,7 @@ import scala.concurrent._
 import scala.util._
 import scala.collection.mutable
 import org.embulk.filter.key_in_redis.ToFutureExtensionOps._
-import org.embulk.filter.key_in_redis.actor.{Actors, Counter, TotalCount}
+import org.embulk.filter.key_in_redis.actor._
 
 class Redis(setKey: String,
             host: String,
@@ -86,23 +86,34 @@ class Redis(setKey: String,
     }
   }
 
-  def exists(values: Seq[String]): Map[String, Future[Boolean]] =
-    cacheInstance match {
+  def exists(values: Seq[String]): Future[mutable.Map[String, Boolean]] = {
+    val futureResult = cacheInstance match {
       case Some(cached) =>
         values.map { v =>
-          v -> Future.successful(cached.contains(v))
-        }.toMap
+          Future.successful(v -> cached.contains(v))
+        }
       case None =>
         val transaction = redis.transaction()
-        val f = values.map { v =>
-          v -> transaction.sismember(setKey, v)
-        }.toMap
+        val futures = values.map { v =>
+          transaction.sismember(setKey, v).map { result =>
+            (v ,result)
+          }
+        }
         transaction.exec()
-        f
+        futures
     }
+    Future.sequence(futureResult).map { sequence =>
+      val result = mutable.ListMap[String,Boolean]()
+      sequence.foreach {
+        case (key, value) =>
+          result.put(key, value)
+      }
+      result
+    }
+  }
 
   def close(): Unit = {
-    while(counter() != 0) {
+    while (counter() != 0) {
       Thread.sleep(1000)
     }
     redis.stop()
@@ -112,7 +123,7 @@ class Redis(setKey: String,
   }
 
   def counter(): Int = {
-    implicit val timeout = Timeout(24, TimeUnit.HOURS)
+    implicit val timeout: Timeout = Timeout(24, TimeUnit.HOURS)
     (Actors.register ? TotalCount)
       .mapTo[Int]
       .toTask

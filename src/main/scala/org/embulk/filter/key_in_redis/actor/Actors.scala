@@ -8,4 +8,5 @@ object Actors {
     classLoader = Some(this.getClass.getClassLoader))
   val register: ActorRef =
     actorSystem.actorOf(Props(classOf[Register]), "filtering_actor")
+
 }

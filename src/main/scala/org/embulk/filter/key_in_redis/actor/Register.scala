@@ -1,6 +1,6 @@
 package org.embulk.filter.key_in_redis.actor
 
-import akka.actor.Actor
+import akka.actor._
 import org.embulk.filter.key_in_redis.KeyInRedisFilterPlugin
 import org.embulk.filter.key_in_redis.redis.Redis
 import org.embulk.filter.key_in_redis.row.Row
@@ -39,16 +39,15 @@ class Register extends Actor {
       counter.put(row.pageBuilder, counter(row.pageBuilder) - 1)
     case TotalCount =>
       sender() ! counter.foldLeft[Int](0) {
-        case (total, (_, counter:Int)) =>
+        case (total, (_, counter: Int)) =>
           total + counter
       }
   }
 
   private def addRecords(rows: List[Row]): Unit = {
-    val result = redis.exists(rows.map(_.matchKey))
-    rows.foreach { row =>
-      val f = result(row.matchKey)
-      f.foreach { result =>
+    redis.exists(rows.map(_.matchKey)).foreach { resultMap =>
+      rows.foreach { row =>
+        val result = resultMap(row.matchKey)
         if (!result) {
           self ! Add(row)
         } else {
