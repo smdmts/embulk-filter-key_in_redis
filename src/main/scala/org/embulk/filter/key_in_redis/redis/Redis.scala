@@ -1,14 +1,20 @@
 package org.embulk.filter.key_in_redis.redis
 
+import java.util.concurrent.TimeUnit
+
+import akka.util.Timeout
+import akka.pattern.ask
 import org.slf4j.Logger
 import redis._
+import org.embulk.filter.key_in_redis.actor.Actors._
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.concurrent._
 import scala.util._
-
 import scala.collection.mutable
+import org.embulk.filter.key_in_redis.ToFutureExtensionOps._
+import org.embulk.filter.key_in_redis.actor._
 
 class Redis(setKey: String,
             host: String,
@@ -16,10 +22,8 @@ class Redis(setKey: String,
             replicaHosts: Map[String, Int],
             db: Option[Int],
             loadOnMemory: Boolean)(implicit logger: Logger) {
-  implicit val actorSystem = akka.actor.ActorSystem(
-    "redis-client",
-    classLoader = Some(this.getClass.getClassLoader))
 
+  implicit val ec: ExecutionContextExecutor = actorSystem.dispatcher
   lazy val cacheInstance: Option[Cache] = if (loadOnMemory) {
     Some(Cache(() => loadAll()))
   } else None
@@ -37,8 +41,7 @@ class Redis(setKey: String,
 
   def loadAll(): mutable.Set[String] = {
     logger.info(s"Loading from Redis start.")
-    import scala.concurrent.ExecutionContext.Implicits.global
-    import ToFutureExtensionOps._
+    import org.embulk.filter.key_in_redis.ToFutureExtensionOps._
     val buffer = mutable.Set.empty[String]
     @tailrec
     def _scan(cursor: Int): Unit = {
@@ -57,10 +60,10 @@ class Redis(setKey: String,
   }
 
   def ping(): String = {
-    import scala.concurrent.ExecutionContext.Implicits.global
     val s: Future[String] = redis.ping()
     s.onComplete {
-      case Success(result) => result
+      case Success(result) =>
+        result
       case Failure(t) =>
         actorSystem.shutdown()
         throw t
@@ -68,38 +71,63 @@ class Redis(setKey: String,
     Await.result(s, 10.minute)
   }
 
-  def exists(values: Seq[String]): Map[String, Boolean] = cacheInstance match {
-    case Some(cached) =>
-      values.map { v =>
-        v -> cached.contains(v)
-      }.toMap
-    case None =>
-      import scala.concurrent.ExecutionContext.Implicits.global
-      import ToFutureExtensionOps._
-      val input = values.zipWithIndex.map(_.swap).toMap
-      val transaction = redis.transaction()
-      val f = values.map { v =>
-        transaction.sismember(setKey, v)
+  def keyExists(): Unit = {
+    val s: Future[Boolean] = redis.exists(setKey)
+    s.onComplete {
+      case Success(_) =>
+      case Failure(t) =>
+        actorSystem.shutdown()
+        throw t
+    }
+    val result = Await.result(s, 10.minute)
+    if (!result) {
+      actorSystem.shutdown()
+      throw sys.error(s"key not found in redis. $setKey")
+    }
+  }
+
+  def exists(values: Seq[String]): Future[mutable.Map[String, Boolean]] = {
+    val futureResult = cacheInstance match {
+      case Some(cached) =>
+        values.map { v =>
+          Future.successful(v -> cached.contains(v))
+        }
+      case None =>
+        val transaction = redis.transaction()
+        val futures = values.map { v =>
+          transaction.sismember(setKey, v).map { result =>
+            (v ,result)
+          }
+        }
+        transaction.exec()
+        futures
+    }
+    Future.sequence(futureResult).map { sequence =>
+      val result = mutable.ListMap[String,Boolean]()
+      sequence.foreach {
+        case (key, value) =>
+          result.put(key, value)
       }
-      transaction.exec()
-      val results = Future
-        .sequence(f)
-        .toTask
-        .unsafePerformSync
-        .zipWithIndex
-        .map(_.swap)
-        .toMap
-      results.map {
-        case (index, result) =>
-          input(index) -> result
-      }
+      result
+    }
   }
 
   def close(): Unit = {
+    while (counter() != 0) {
+      Thread.sleep(1000)
+    }
     redis.stop()
     // wait for stopping.
     Thread.sleep(1000)
     actorSystem.shutdown()
+  }
+
+  def counter(): Int = {
+    implicit val timeout: Timeout = Timeout(24, TimeUnit.HOURS)
+    (Actors.register ? TotalCount)
+      .mapTo[Int]
+      .toTask
+      .unsafePerformSync
   }
 
 }
